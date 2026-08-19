@@ -12,6 +12,9 @@
   styleTag.textContent = `.${HIDE_CLASS} { display: none !important; }`;
   (document.head || document.documentElement).appendChild(styleTag);
 
+  const IS_INSTAGRAM = location.hostname.includes('instagram.com');
+  const IS_YOUTUBE = location.hostname.includes('youtube.com');
+
   const hide = (element) => {
     if (element && !element.classList.contains(HIDE_CLASS)) {
       console.log('Hiding element:', element);
@@ -46,22 +49,62 @@
     event.preventDefault();
   };
 
-  // iOS/Orion fires touch/pointer events before (or instead of) a
-  // synthesized "click", and Instagram's mobile player often reacts
-  // to those directly. Block the whole family, all in capture phase,
-  // and explicitly non-passive so preventDefault() actually works.
-  const BLOCKED_EVENTS = [
-    'click',
-    'pointerdown', 'pointerup',
-    'mousedown', 'mouseup',
-    'touchstart', 'touchend'
-  ];
+  // Distinguish a tap (finger barely moves - this is what toggles
+  // play/pause) from a scroll/drag gesture (finger moves past a
+  // small threshold). We must NOT call preventDefault() on
+  // touchstart/touchmove, since that's what tells the browser to
+  // cancel its native scroll gesture entirely. Instead we only
+  // decide whether to block on touchend, once we know if it was a
+  // tap or a scroll, and only preventDefault in the tap case.
+  const TAP_MOVE_THRESHOLD = 10; // px
+  const touchState = new WeakMap();
+
+  const onTouchStart = (event) => {
+    if (isMuteButton(event.target)) return;
+    const t = event.touches[0];
+    touchState.set(event.currentTarget, { x: t.clientX, y: t.clientY, moved: false });
+    // Deliberately no preventDefault here - lets native scroll begin.
+  };
+
+  const onTouchMove = (event) => {
+    const state = touchState.get(event.currentTarget);
+    if (!state) return;
+    const t = event.touches[0];
+    if (Math.abs(t.clientX - state.x) > TAP_MOVE_THRESHOLD ||
+        Math.abs(t.clientY - state.y) > TAP_MOVE_THRESHOLD) {
+      state.moved = true;
+    }
+    // No preventDefault here either - scrolling stays uninterrupted.
+  };
+
+  const onTouchEnd = (event) => {
+    if (isMuteButton(event.target)) return;
+    const state = touchState.get(event.currentTarget);
+    touchState.delete(event.currentTarget);
+    if (state && !state.moved) {
+      // This was a tap, not a scroll - block it so it can't
+      // toggle play/pause (and suppress the synthesized click
+      // that would otherwise follow).
+      event.stopImmediatePropagation();
+      event.stopPropagation();
+      event.preventDefault();
+    }
+  };
+
+  // "click" (and mouse events, for trackpad/mouse users) get the
+  // simple blanket block since those don't drive scrolling. Touch
+  // gets the tap-vs-scroll-aware handlers instead, so scrolling
+  // through a full-screen video still works.
+  const CLICK_LIKE_EVENTS = ['click', 'mousedown', 'mouseup'];
 
   const disableVideoClicks = (element) => {
     if (!element || clickBlockedElements.has(element)) return;
-    BLOCKED_EVENTS.forEach(evt => {
+    CLICK_LIKE_EVENTS.forEach(evt => {
       element.addEventListener(evt, blockClick, { capture: true, passive: false });
     });
+    element.addEventListener('touchstart', onTouchStart, { capture: true, passive: true });
+    element.addEventListener('touchmove', onTouchMove, { capture: true, passive: true });
+    element.addEventListener('touchend', onTouchEnd, { capture: true, passive: false });
     clickBlockedElements.add(element);
   };
 
@@ -159,49 +202,71 @@
     }
   };
 
+  // --- YouTube: hide the end-of-video "up next" suggestion wall ---
+  // Covers both the fullscreen grid of stills and the normal
+  // in-player endscreen overlay. These are stable YouTube player
+  // classes, not auto-generated, so a direct class match is safe
+  // here (unlike Instagram's obfuscated classes elsewhere in this file).
+  const hideYouTubeEndScreenSuggestions = () => {
+    const selectors = [
+      '.ytp-fullscreen-grid-stills-container', // fullscreen "video wall"
+      '.html5-endscreen',                      // in-player endscreen overlay
+      '.ytp-endscreen-content'                 // inner content of the above
+    ];
+    selectors.forEach(sel => {
+      document.querySelectorAll(sel).forEach(hide);
+    });
+  };
+
   const processPage = () => {
     console.log('Running processPage...');
 
-    const body = document.body;
-    let caughtUpSection = null;
-    let suggestedPostsSection = null;
+    if (IS_INSTAGRAM) {
+      const body = document.body;
+      let caughtUpSection = null;
+      let suggestedPostsSection = null;
 
-    const textNodes = body.querySelectorAll('span, h1, h2, h3, h4');
-    textNodes.forEach(node => {
-      if (node.textContent.includes("re all caught up")) {
-        console.log('Found "You\'re all caught up" section:', node);
-        caughtUpSection = node.closest('div');
-      }
-      if (node.textContent.includes("Suggested Posts")) {
-        console.log('Found "Suggested Posts" section:', node);
-        suggestedPostsSection = node.closest('div');
-      }
-    });
-
-    const targetSection = caughtUpSection || suggestedPostsSection;
-
-    if (targetSection) {
-      hideEverythingAfter(targetSection);
-    }
-
-    // Hide articles containing "Suggested for you"
-    const articles = document.querySelectorAll('article');
-    articles.forEach(article => {
-      const spans = article.querySelectorAll('span');
-      spans.forEach(span => {
-        if (span.textContent.includes("Suggested for you")) {
-          console.log('Found "Suggested for you" article:', article);
-          hide(article);
+      const textNodes = body.querySelectorAll('span, h1, h2, h3, h4');
+      textNodes.forEach(node => {
+        if (node.textContent.includes("re all caught up")) {
+          console.log('Found "You\'re all caught up" section:', node);
+          caughtUpSection = node.closest('div');
+        }
+        if (node.textContent.includes("Suggested Posts")) {
+          console.log('Found "Suggested Posts" section:', node);
+          suggestedPostsSection = node.closest('div');
         }
       });
-    });
 
-    processVideoClickBlocking();
-    hideReelsLink();
-    hideCreateLink();
-    hideSearchLink();
-    hideAds();
-    hideSuggestedForYouWidget();
+      const targetSection = caughtUpSection || suggestedPostsSection;
+
+      if (targetSection) {
+        hideEverythingAfter(targetSection);
+      }
+
+      // Hide articles containing "Suggested for you"
+      const articles = document.querySelectorAll('article');
+      articles.forEach(article => {
+        const spans = article.querySelectorAll('span');
+        spans.forEach(span => {
+          if (span.textContent.includes("Suggested for you")) {
+            console.log('Found "Suggested for you" article:', article);
+            hide(article);
+          }
+        });
+      });
+
+      processVideoClickBlocking();
+      hideReelsLink();
+      hideCreateLink();
+      hideSearchLink();
+      hideAds();
+      hideSuggestedForYouWidget();
+    }
+
+    if (IS_YOUTUBE) {
+      hideYouTubeEndScreenSuggestions();
+    }
   };
 
   const mutationObserver = new MutationObserver((mutationsList) => {
