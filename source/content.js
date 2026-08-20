@@ -32,12 +32,50 @@
   // containing the "Audio is muted"/"Audio is unmuted" SVG, so we
   // can let that one click through instead of swallowing it too.
   const isMuteButton = (target) => {
-    const btn = target.closest && target.closest('[role="button"]');
+    const btn = target.closest && target.closest('[role="button"], button');
     if (!btn) return false;
+    const ownLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+    if (ownLabel.includes('audio') || ownLabel.includes('mute')) return true;
     const svg = btn.querySelector('svg[aria-label]');
-    if (!svg) return false;
-    const label = (svg.getAttribute('aria-label') || '').toLowerCase();
-    return label.includes('audio');
+    if (svg) {
+      const svgLabel = (svg.getAttribute('aria-label') || '').toLowerCase();
+      if (svgLabel.includes('audio') || svgLabel.includes('mute')) return true;
+    }
+    return false;
+  };
+
+  // Instagram's own click handler on the video does two things at
+  // once: toggles play/pause AND pulls the video into an immersive
+  // "focus" view with infinite scroll. We only want the former. So
+  // instead of letting the click through (which does both) or fully
+  // blocking it (which does neither), we intercept it and drive
+  // play/pause ourselves via the video API, then stop the event so
+  // Instagram's handler never runs and never triggers focus mode.
+  const findAssociatedVideo = (currentTarget) => {
+    if (!currentTarget) return null;
+    if (currentTarget.tagName === 'VIDEO') return currentTarget;
+    // currentTarget is the div[aria-label="Video player"] wrapper.
+    // The <video> isn't a simple sibling - it's nested in a separate
+    // branch a couple of levels up, so climb until we find an
+    // ancestor whose subtree actually contains a <video>.
+    let node = currentTarget;
+    for (let i = 0; i < 6 && node; i++) {
+      node = node.parentElement;
+      if (!node) break;
+      const video = node.querySelector('video');
+      if (video) return video;
+    }
+    return null;
+  };
+
+  const togglePlayPause = (currentTarget) => {
+    const video = findAssociatedVideo(currentTarget);
+    if (!video) return;
+    if (video.paused) {
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
   };
 
   const blockClick = (event) => {
@@ -47,6 +85,11 @@
     event.stopImmediatePropagation();
     event.stopPropagation();
     event.preventDefault();
+    // mousedown/mouseup/click all fire for one physical click; only
+    // toggle once, on 'click', to avoid toggling three times over.
+    if (event.type === 'click') {
+      togglePlayPause(event.currentTarget);
+    }
   };
 
   // Distinguish a tap (finger barely moves - this is what toggles
@@ -82,12 +125,13 @@
     const state = touchState.get(event.currentTarget);
     touchState.delete(event.currentTarget);
     if (state && !state.moved) {
-      // This was a tap, not a scroll - block it so it can't
-      // toggle play/pause (and suppress the synthesized click
-      // that would otherwise follow).
+      // This was a tap, not a scroll - intercept it (so Instagram's
+      // own handler and its focus-mode side effect never fire) and
+      // drive play/pause ourselves instead.
       event.stopImmediatePropagation();
       event.stopPropagation();
       event.preventDefault();
+      togglePlayPause(event.currentTarget);
     }
   };
 
@@ -202,16 +246,15 @@
     }
   };
 
-  // --- YouTube: hide the end-of-video "up next" suggestion wall ---
-  // Covers both the fullscreen grid of stills and the normal
-  // in-player endscreen overlay. These are stable YouTube player
-  // classes, not auto-generated, so a direct class match is safe
-  // here (unlike Instagram's obfuscated classes elsewhere in this file).
+  // --- YouTube: hide only the suggested-video thumbnails in the
+  // end-of-video overlay, not the endscreen container itself (which
+  // YouTube reuses for other chrome like Subscribe/Replay buttons,
+  // and which sits over the click-to-pause hit area).
   const hideYouTubeEndScreenSuggestions = () => {
     const selectors = [
-      '.ytp-fullscreen-grid-stills-container', // fullscreen "video wall"
-      '.html5-endscreen',                      // in-player endscreen overlay
-      '.ytp-endscreen-content'                 // inner content of the above
+      '.ytp-fullscreen-grid-stills-container', // fullscreen "video wall" grid
+      'a.ytp-modern-videowall-still',          // individual suggestion card (current UI)
+      'a.ytp-videowall-still'                  // individual suggestion card (older UI)
     ];
     selectors.forEach(sel => {
       document.querySelectorAll(sel).forEach(hide);
