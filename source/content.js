@@ -218,6 +218,22 @@
     });
   };
 
+  // Hide the "More posts from [user]" widget at the bottom of individual post pages.
+  // We locate the heading text, then climb up two levels to hide the container
+  // that holds both the heading and the grid of posts.
+  const hideMorePostsFrom = () => {
+    document.querySelectorAll('div[dir="auto"]').forEach(div => {
+      if (div.textContent.includes("More posts from")) {
+        const headerRow = div.parentElement;
+        const widget = headerRow && headerRow.parentElement;
+        if (widget) {
+          console.log('Found "More posts from" widget:', widget);
+          hide(widget);
+        }
+      }
+    });
+  };
+
   const processVideoClickBlocking = () => {
     // Actual <video> elements
     document.querySelectorAll('video').forEach(disableVideoClicks);
@@ -305,6 +321,7 @@
       hideSearchLink();
       hideAds();
       hideSuggestedForYouWidget();
+      hideMorePostsFrom(); // Added call to new block function here
     }
 
     if (IS_YOUTUBE) {
