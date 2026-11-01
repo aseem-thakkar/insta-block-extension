@@ -296,7 +296,12 @@
   // Taps (play/pause), horizontal drags (seeking), and scrolling inside
   // overlays such as the comments sheet are intentionally left alone.
   // ------------------------------------------------------------------
-  const REELS_EXCLUDED_ROUTE = /^\/(stories|direct)(\/|$)/;
+  // Stories are the one view we leave alone: their only vertical gesture
+  // is swipe-down-to-dismiss and they advance horizontally on tap. Reels
+  // opened from a DM are NOT excluded - that overlay keeps the
+  // /direct/t/... URL instead of navigating to /reels/, so the route is
+  // handled in isInReelViewer() below.
+  const REELS_EXCLUDED_ROUTE = /^\/stories(\/|$)/;
 
   const viewportSize = () => ({
     width: window.innerWidth || document.documentElement.clientWidth || 0,
@@ -313,6 +318,7 @@
   };
 
   const REEL_ROUTE = /^\/reels?(\/|$)/;
+  const DIRECT_ROUTE = /^\/direct(\/|$)/;
 
   // A full-screen video alone isn't proof we're in the Reels viewer: a
   // tall 9:16 video in the feed can look like one. Require the reel
@@ -320,6 +326,10 @@
   const isInReelViewer = (video) => {
     if (REEL_ROUTE.test(location.pathname)) return true;
     if (video.closest('[role="dialog"]')) return true;
+    // A reel shared in a DM opens the full-screen viewer as an overlay
+    // and the URL stays on /direct/t/.../ . Nothing else in a DM thread
+    // is a full-screen video, so the route plus the size check is enough.
+    if (DIRECT_ROUTE.test(location.pathname)) return true;
     let node = video;
     for (let i = 0; node && i < 15; i++, node = node.parentElement) {
       if (isVerticalSnapTrack(node)) return true;
