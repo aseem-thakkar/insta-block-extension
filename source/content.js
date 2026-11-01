@@ -277,6 +277,245 @@
     });
   };
 
+  // ------------------------------------------------------------------
+  // Mobile Reels: disable swipe-up / swipe-down paging
+  //
+  // On mobile Instagram the immersive Reels view is a full-screen,
+  // vertically snapping track: one swipe = next reel, forever. The
+  // desktop trick above (swallowing the click that opens focus mode)
+  // doesn't help once the viewer is already open, so the swipe itself
+  // has to be intercepted.
+  //
+  // Two separate things advance to the next reel, and both are stopped:
+  //   1. the browser's native scroll/snap, cancelled with
+  //      preventDefault() on a non-passive touchmove listener;
+  //   2. Instagram's own JS gesture handler, which sits deeper in the
+  //      tree and never receives the event because a capture-phase
+  //      listener on window stops propagation first.
+  //
+  // Taps (play/pause), horizontal drags (seeking), and scrolling inside
+  // overlays such as the comments sheet are intentionally left alone.
+  // ------------------------------------------------------------------
+  const REELS_EXCLUDED_ROUTE = /^\/(stories|direct)(\/|$)/;
+
+  const viewportSize = () => ({
+    width: window.innerWidth || document.documentElement.clientWidth || 0,
+    height: window.innerHeight || document.documentElement.clientHeight || 0
+  });
+
+  // Instagram's reel track is the element that carries the vertical
+  // scroll-snap. It's usually an inline style (and a computed style).
+  const isVerticalSnapTrack = (element) => {
+    const computed = getComputedStyle(element).scrollSnapType;
+    if (computed && /(^|\s)y(\s|$)/.test(computed)) return true;
+    const inline = element.getAttribute('style') || '';
+    return /scroll-snap-type\s*:\s*y\b/.test(inline);
+  };
+
+  const REEL_ROUTE = /^\/reels?(\/|$)/;
+
+  // A full-screen video alone isn't proof we're in the Reels viewer: a
+  // tall 9:16 video in the feed can look like one. Require the reel
+  // route, the viewer's modal wrapper, or the vertical snap track.
+  const isInReelViewer = (video) => {
+    if (REEL_ROUTE.test(location.pathname)) return true;
+    if (video.closest('[role="dialog"]')) return true;
+    let node = video;
+    for (let i = 0; node && i < 15; i++, node = node.parentElement) {
+      if (isVerticalSnapTrack(node)) return true;
+    }
+    return false;
+  };
+
+  // The immersive player is a <video> that covers (almost) the whole
+  // viewport. Feed videos, grid previews and Story thumbnails are far
+  // smaller, so this is a reliable "we are inside the immersive viewer"
+  // signal that doesn't depend on Instagram's obfuscated class names.
+  const findImmersiveReelVideo = () => {
+    if (REELS_EXCLUDED_ROUTE.test(location.pathname)) return null;
+    const { width, height } = viewportSize();
+    if (!width || !height) return null;
+
+    const onScreen = (rect) => rect.bottom > 0 && rect.top < height;
+
+    for (const video of document.querySelectorAll('video')) {
+      const rect = video.getBoundingClientRect();
+      // Skip preloaded neighbours that sit just off-screen in the track.
+      if (!onScreen(rect)) continue;
+      if (rect.width >= width * 0.85 && rect.height >= height * 0.7 &&
+          isInReelViewer(video)) {
+        return video;
+      }
+    }
+
+    // Fallback for letterboxed reels: the video itself may be shorter
+    // than the viewport, but it still lives inside the full-screen
+    // vertical snap track that does the paging.
+    for (const track of document.querySelectorAll('[style*="scroll-snap-type"]')) {
+      const rect = track.getBoundingClientRect();
+      if (!onScreen(rect) || rect.width < width * 0.8 || rect.height < height * 0.8) continue;
+      if (!isVerticalSnapTrack(track)) continue;
+      for (const video of track.querySelectorAll('video')) {
+        if (onScreen(video.getBoundingClientRect())) return video;
+      }
+    }
+
+    // Reels can also be photo carousels. On a reel URL the full-screen
+    // vertical snap track alone is enough evidence that the viewer is
+    // open, so lock the track itself.
+    if (REEL_ROUTE.test(location.pathname)) {
+      for (const track of document.querySelectorAll('[style*="scroll-snap-type"]')) {
+        const rect = track.getBoundingClientRect();
+        if (!onScreen(rect) || rect.width < width * 0.8 || rect.height < height * 0.8) continue;
+        if (isVerticalSnapTrack(track)) return track;
+      }
+    }
+
+    return null;
+  };
+
+  // Comments, the caption and other sheets are scrollable overlays that
+  // sit on top of the reel. A swipe starting inside one of those is a
+  // normal scroll and must keep working; a swipe starting on the reel
+  // itself is the one we want to kill.
+  const swipeStartsInScrollableOverlay = (target, reelRoot) => {
+    if (!(target instanceof Element)) return false;
+    for (let node = target;
+         node && node !== document.body && node !== document.documentElement;
+         node = node.parentElement) {
+      if (node === reelRoot || node.contains(reelRoot)) return false;
+      const style = getComputedStyle(node);
+      if (style.overflowY !== 'auto' && style.overflowY !== 'scroll' && style.overflowY !== 'overlay') continue;
+      if (node.scrollHeight - node.clientHeight > 16) return true;
+    }
+    return false;
+  };
+
+  const SWIPE_MOVE_SLOP = 8; // px of movement before a touch counts as a drag
+
+  const swipeGuard = {
+    armed: false,
+    blocked: false,
+    startX: 0,
+    startY: 0,
+    suppressClickUntil: 0
+  };
+
+  const armSwipeGuard = (target, x, y) => {
+    swipeGuard.armed = false;
+    swipeGuard.blocked = false;
+    const reelVideo = findImmersiveReelVideo();
+    if (!reelVideo) return;
+    if (swipeStartsInScrollableOverlay(target, reelVideo)) return;
+    swipeGuard.armed = true;
+    swipeGuard.startX = x;
+    swipeGuard.startY = y;
+  };
+
+  const swipeShouldBeBlocked = (x, y) => {
+    if (!swipeGuard.armed) return false;
+    if (swipeGuard.blocked) return true;
+    const dx = Math.abs(x - swipeGuard.startX);
+    const dy = Math.abs(y - swipeGuard.startY);
+    if (dx < SWIPE_MOVE_SLOP && dy < SWIPE_MOVE_SLOP) return false;
+    // Horizontal drags are seek gestures / carousels - let them be.
+    if (dx >= dy) {
+      swipeGuard.armed = false;
+      return false;
+    }
+    swipeGuard.blocked = true;
+    return true;
+  };
+
+  const blockSwipeEvent = (event) => {
+    swipeGuard.suppressClickUntil = performance.now() + 400;
+    if (event.cancelable) event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+  };
+
+  const onSwipeTouchStart = (event) => {
+    if (event.touches.length !== 1) {
+      swipeGuard.armed = false;
+      swipeGuard.blocked = false;
+      return;
+    }
+    const touch = event.touches[0];
+    armSwipeGuard(event.target, touch.clientX, touch.clientY);
+  };
+
+  const onSwipeTouchMove = (event) => {
+    if (!swipeGuard.armed || event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    if (swipeShouldBeBlocked(touch.clientX, touch.clientY)) {
+      blockSwipeEvent(event);
+    }
+  };
+
+  // The touchend has to be swallowed too, otherwise Instagram can
+  // compare its recorded touchstart position with the touchend
+  // position and advance anyway. preventDefault() on touchend also
+  // suppresses the synthetic click a swipe leaves behind (which would
+  // otherwise pause the video through the handlers above).
+  const onSwipeTouchEnd = (event) => {
+    const blocked = swipeGuard.blocked;
+    swipeGuard.armed = false;
+    if (!blocked) return;
+    blockSwipeEvent(event);
+  };
+
+  // WebKit also emits pointer events for touch. Blocking both streams
+  // keeps Instagram from working around the cancelled touch events.
+  const isTouchPointer = (event) => event.pointerType === 'touch';
+
+  const onSwipePointerDown = (event) => {
+    if (!isTouchPointer(event)) return;
+    armSwipeGuard(event.target, event.clientX, event.clientY);
+  };
+
+  const onSwipePointerMove = (event) => {
+    if (!isTouchPointer(event) || !swipeGuard.armed) return;
+    if (swipeShouldBeBlocked(event.clientX, event.clientY)) {
+      blockSwipeEvent(event);
+    }
+  };
+
+  const onSwipePointerEnd = (event) => {
+    if (!isTouchPointer(event)) return;
+    const blocked = swipeGuard.blocked;
+    swipeGuard.armed = false;
+    if (!blocked) return;
+    blockSwipeEvent(event);
+  };
+
+  // Safety net: if a browser still synthesises a click after a blocked
+  // swipe, swallow it so it can't toggle play/pause.
+  const onSwipeClick = (event) => {
+    if (performance.now() > swipeGuard.suppressClickUntil) return;
+    if (event.cancelable) event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+  };
+
+  const installMobileReelSwipeLock = () => {
+    if (window.__igReelSwipeLockInstalled) return;
+    window.__igReelSwipeLockInstalled = true;
+
+    // Capture phase on window so these run before React's root
+    // listeners (and before the per-video handlers above).
+    window.addEventListener('touchstart', onSwipeTouchStart, { capture: true, passive: true });
+    window.addEventListener('touchmove', onSwipeTouchMove, { capture: true, passive: false });
+    window.addEventListener('touchend', onSwipeTouchEnd, { capture: true, passive: false });
+    window.addEventListener('touchcancel', onSwipeTouchEnd, { capture: true, passive: true });
+
+    window.addEventListener('pointerdown', onSwipePointerDown, { capture: true, passive: true });
+    window.addEventListener('pointermove', onSwipePointerMove, { capture: true, passive: false });
+    window.addEventListener('pointerup', onSwipePointerEnd, { capture: true, passive: false });
+    window.addEventListener('pointercancel', onSwipePointerEnd, { capture: true, passive: false });
+
+    window.addEventListener('click', onSwipeClick, { capture: true, passive: false });
+  };
+
   const processPage = () => {
     console.log('Running processPage...');
 
@@ -344,6 +583,10 @@
     attributes: true,
     attributeFilter: ['style', 'class']
   });
+
+  if (IS_INSTAGRAM) {
+    installMobileReelSwipeLock();
+  }
 
   processPage();
 })();
