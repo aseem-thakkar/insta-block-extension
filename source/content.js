@@ -2,6 +2,7 @@
 (function () {
   const HIDE_CLASS = '__ig_ext_hidden__';
 
+
   // Inject a stylesheet rule instead of relying on inline styles.
   // React can (and does) overwrite element.style.display on its own
   // re-renders, silently undoing a plain inline-style hide. A CSS
@@ -9,11 +10,24 @@
   // every time, so content stays hidden even after React re-renders
   // or recycles the DOM node (common with virtualized/scrolled lists).
   const styleTag = document.createElement('style');
-  styleTag.textContent = `.${HIDE_CLASS} { display: none !important; }`;
+  styleTag.textContent = .${HIDE_CLASS} { display: none !important; };
   (document.head || document.documentElement).appendChild(styleTag);
+
 
   const IS_INSTAGRAM = location.hostname.includes('instagram.com');
   const IS_YOUTUBE = location.hostname.includes('youtube.com');
+
+
+  if (IS_INSTAGRAM) {
+    styleTag.textContent += `
+      html, body {
+        overflow-x: hidden !important;
+        overflow-x: clip !important;
+        overscroll-behavior-x: none !important;
+      }
+    `;
+  }
+
 
   const hide = (element) => {
     if (element && !element.classList.contains(HIDE_CLASS)) {
