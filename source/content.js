@@ -23,6 +23,8 @@
       html, body {
         overflow-x: hidden !important;
         overflow-x: clip !important;
+      }
+      * {
         overscroll-behavior-x: none !important;
       }
     `;
