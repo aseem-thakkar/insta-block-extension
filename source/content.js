@@ -10,7 +10,7 @@
   // every time, so content stays hidden even after React re-renders
   // or recycles the DOM node (common with virtualized/scrolled lists).
   const styleTag = document.createElement('style');
-  styleTag.textContent = .${HIDE_CLASS} { display: none !important; };
+  styleTag.textContent = `.${HIDE_CLASS} { display: none !important; }`;
   (document.head || document.documentElement).appendChild(styleTag);
 
 
