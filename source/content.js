@@ -27,6 +27,13 @@
       * {
         overscroll-behavior-x: none !important;
       }
+      @media (max-width: 767px) {
+        article video {
+          width: 100% !important;
+          max-width: none !important;
+          object-fit: contain !important;
+        }
+      }
     `;
   }
 
@@ -41,12 +48,6 @@
   const hiddenArticles = new Set();
   const clickBlockedElements = new WeakSet();
 
-  // Swallow the click before Instagram's own handlers (play/pause,
-  // mute toggle, "view profile", etc.) get a chance to react to it.
-  // The mute/unmute button lives inside the same video wrapper we're
-  // blocking clicks on. Detect it via its role="button" ancestor
-  // containing the "Audio is muted"/"Audio is unmuted" SVG, so we
-  // can let that one click through instead of swallowing it too.
   const isMuteButton = (target) => {
     const btn = target.closest && target.closest('[role="button"], button');
     if (!btn) return false;
@@ -58,6 +59,18 @@
       if (svgLabel.includes('audio') || svgLabel.includes('mute')) return true;
     }
     return false;
+  };
+
+  // Let controls inside the video-player wrapper handle their own
+  // clicks and taps; only intercept gestures on the player itself.
+  const isInteractiveControl = (target) => {
+    const control = target.closest &&
+      target.closest('button, a[href], input, textarea, select, label, summary, ' +
+        '[role="button"], [role="link"], [role="menuitem"], [contenteditable="true"]');
+    if (control) return true;
+
+    // Some Instagram controls are custom elements without a button role.
+    return isMuteButton(target);
   };
 
   // Instagram's own click handler on the video does two things at
@@ -95,9 +108,7 @@
   };
 
   const blockClick = (event) => {
-    if (isMuteButton(event.target)) {
-      return; // let mute/unmute clicks through normally
-    }
+    if (isInteractiveControl(event.target)) return;
     event.stopImmediatePropagation();
     event.stopPropagation();
     event.preventDefault();
@@ -119,7 +130,7 @@
   const touchState = new WeakMap();
 
   const onTouchStart = (event) => {
-    if (isMuteButton(event.target)) return;
+    if (isInteractiveControl(event.target)) return;
     const t = event.touches[0];
     touchState.set(event.currentTarget, { x: t.clientX, y: t.clientY, moved: false });
     // Deliberately no preventDefault here - lets native scroll begin.
@@ -137,7 +148,7 @@
   };
 
   const onTouchEnd = (event) => {
-    if (isMuteButton(event.target)) return;
+    if (isInteractiveControl(event.target)) return;
     const state = touchState.get(event.currentTarget);
     touchState.delete(event.currentTarget);
     if (state && !state.moved) {
