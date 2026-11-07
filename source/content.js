@@ -208,6 +208,27 @@
     });
   };
 
+  // Hide Instagram's mobile-web "Use the app" prompt without hiding
+  // the bottom navigation beneath it.
+  const hideUseAppBanner = () => {
+    const { height, width } = viewportSize();
+    if (!height || !width) return;
+
+    document.querySelectorAll('a, button, span, div').forEach(label => {
+      if (label.textContent.trim().toLowerCase() !== 'use the app') return;
+
+      let candidate = label;
+      for (let i = 0; i < 8 && candidate; i++, candidate = candidate.parentElement) {
+        const rect = candidate.getBoundingClientRect();
+        if (rect.width >= width * 0.8 && rect.height >= 35 && rect.height <= 160 &&
+            rect.top >= height * 0.65 && rect.bottom <= height + 10) {
+          hide(candidate);
+          break;
+        }
+      }
+    });
+  };
+
   // Hide sponsored posts. Instagram marks these with a small "Ad"
   // (or "Sponsored") badge next to the username — find that badge,
   // then hide the whole enclosing <article> so the entire post goes.
@@ -595,6 +616,7 @@
       hideReelsLink();
       hideCreateLink();
       hideSearchLink();
+      hideUseAppBanner();
       hideAds();
       hideSuggestedForYouWidget();
       hideMorePostsFrom(); // Added call to new block function here

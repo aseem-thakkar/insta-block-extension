@@ -16,7 +16,8 @@ infinite doom-scroll loop is broken. Taps, horizontal seeking and
 scrolling inside the comments sheet still work, and Like, Comment and
 other overlay controls remain clickable. Reels opened from a direct
 message are covered too, even though the URL stays on /direct/t/.../
-while the viewer is open.
+while the viewer is open. The mobile-web "Use the app" banner is also
+hidden without removing the bottom navigation.
 
 On phone-sized screens, feed videos expand to the post's available width
 without overriding Instagram's media-frame height or stretching the video.
