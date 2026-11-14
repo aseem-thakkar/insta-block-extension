@@ -107,6 +107,27 @@
     }
   };
 
+  const REEL_CARD_ROUTE = /^\/reels?\/[^/]+\/?$/;
+  const REEL_CARD_CONTROLS =
+    'button, input, textarea, select, [role="button"], [role="menuitem"], [contenteditable="true"]';
+
+  const blockReelCardNavigation = (event) => {
+    if (!(event.target instanceof Element)) return;
+    const anchor = event.target.closest('a[href]');
+    if (!anchor) return;
+    const url = new URL(anchor.href, location.href);
+    if (url.origin !== location.origin || !REEL_CARD_ROUTE.test(url.pathname)) return;
+
+    event.preventDefault();
+    if (event.target.closest(REEL_CARD_CONTROLS)) return;
+
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+
+    const player = event.target.closest('video, [aria-label="Video player"][role="group"]');
+    if (event.type === 'click' && player) togglePlayPause(player);
+  };
+
   const blockClick = (event) => {
     if (isInteractiveControl(event.target)) return;
     event.stopImmediatePropagation();
@@ -645,6 +666,8 @@
 
   if (IS_INSTAGRAM) {
     installMobileReelSwipeLock();
+    window.addEventListener('click', blockReelCardNavigation, { capture: true });
+    window.addEventListener('auxclick', blockReelCardNavigation, { capture: true });
   }
 
   processPage();

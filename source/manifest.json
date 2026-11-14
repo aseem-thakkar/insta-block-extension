@@ -2,7 +2,7 @@
     "manifest_version": 3,
     "name": "Hide Posts After Caught Up",
     "version": "1.2",
-    "description": "Hide all Instagram posts after 'You're all caught up' or 'Suggested Posts' section, block YouTube end-of-video suggestions, and disable swipe paging in the mobile Instagram Reels viewer.",
+    "description": "Hide Instagram suggested posts, prevent opening Reels in the immersive viewer, block YouTube end-of-video suggestions, and disable swipe paging in the mobile Instagram Reels viewer.",
     "permissions": ["storage", "activeTab", "scripting"],
     "host_permissions": ["https://www.instagram.com/*", "https://www.youtube.com/*"],
     "background": {
